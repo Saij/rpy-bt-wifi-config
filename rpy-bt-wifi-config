@@ -1,0 +1,91 @@
+#!/usr/bin/python
+__version__ = "0.1"
+__author__ = "Saij"
+
+import sys, os, stat
+import argparse, logging, asyncore, time
+import wpactrl
+
+from pybtapi import BTServer, BTError
+
+class MainClass(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        super(MainClass, self).__init__(*args, **kwargs)
+
+        self.add_argument("-v", "--version", action = "store_true", help = "Print version info and exit")
+        self.add_argument("-d", "--debug", action = "store_true", help = "Enables debug output")
+        self.add_argument("--serial", action = "store_true", help = "Change UUID to serial communication UUID (only in debug mode)")
+        self.add_argument("--ctrl-path", action = "store", help = "Path of wpa_supplicant control sockets", default = "/var/run/wpa_supplicant")
+        
+        self.add_argument("-i", "--interface", action = "store", help = "Interface to configure using wpa_supplicant", required = True)
+        
+        self.args = {}
+
+    def process(self):
+        self.args = vars(self.parse_args())
+        if self.args["version"]:
+            print("rpy-bt-wifi-config v%s" % __version__)
+            sys.exit(0)
+
+        uuid = "3FBBC3A8-627F-4A29-B76C-5CB836BD37A3"
+        if self.args["debug"]:
+            logging.basicConfig(level = logging.DEBUG)
+            if self.args["serial"]:
+                uuid = "00001101-0000-1000-8000-00805F9B34FB"
+        else:
+            logging.basicConfig(level = logging.INFO)
+
+        print("Raspberry PI Bluetooth WiFi Config\n")
+
+        # Setup wpa_supplicant control interface
+        socket = os.path.join(self.args["ctrl_path"], self.args["interface"])
+        if not os.path.exists(socket):
+            logging.error("Socket %s could not be found!" % socket)
+            sys.exit(1)
+
+        if not stat.S_ISSOCK(os.stat(socket).st_mode):
+            logging.error("Path %s is not a socket!" % socket)
+            sys.exit(1)
+
+        self.wpa = wpactrl.WPACtrl(socket)
+
+        logging.info("Connected to wpa_supplicant through control socket")
+        
+        # Setup BTServer
+        self.btserver = BTServer(uuid = uuid, service_name = "RPy BT WiFi Config")
+        self.btserver.add_command("scan", self._cmd_scan)
+
+        try:
+            # Start loop
+            asyncore.loop()
+        except KeyboardInterrupt:
+            print "Exiting\n"
+
+            sys.exit(0)
+
+        return True
+
+    def _cmd_scan(self, handler, wait = 10):
+        print "Wait: %d" % wait
+        try:
+            ret = self.wpa.request("SCAN")
+            logging.debug("SCAN returns: %s" % ret)
+            if ret.strip() != "OK":
+                handler.send_error(BTError.ERR_UNKNOWN, "Error requesting scan: %s" % ret)
+                return;
+
+            time.sleep(wait)
+
+            scan_result = self.wpa.scanresults()
+            logging.debug("SCAN RESULT returns: %s" % scan_result)
+            
+            # Parse scan result and extract variables
+        except wpactrl.error as e:
+            handler.send_error(BTError.ERR_UNKNOWN, e)
+            pass
+
+# Main function
+if __name__ == "__main__":
+    parser = MainClass()
+    if (not parser.process()):
+        parser.print_help()
