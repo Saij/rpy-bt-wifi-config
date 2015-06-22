@@ -1,6 +1,0 @@
-[submodule "python-wpa-supplicant"]
-	path = python-wpa-supplicant
-	url = https://github.com/vonAffenfels/python-wpa-supplicant.git
-[submodule "pybtapi"]
-	path = pybtapi
-	url = https://github.com/Saij/pybtapi.git
