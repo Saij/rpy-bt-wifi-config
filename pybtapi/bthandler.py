@@ -37,7 +37,7 @@ class BTHandler(asyncore.dispatcher_with_send):
         json_string = json.dumps({"error": error_code, "error_message": error_message, "success": False})
         self.send(json_string + chr(0))
 
-    def send_success(self, data):
+    def send_success(self, data = {}):
         json_string = json.dumps({"success": True, "data": data})
         self.send(json_string + chr(0))
     

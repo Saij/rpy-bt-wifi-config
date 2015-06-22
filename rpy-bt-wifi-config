@@ -53,20 +53,49 @@ class MainClass(argparse.ArgumentParser):
         
         # Setup BTServer
         self.btserver = BTServer(uuid = uuid, service_name = "RPy BT WiFi Config")
+        
         self.btserver.add_command("scan", self._cmd_scan)
+        self.btserver.add_command("scan_result", self._cmd_scan_result)
+        self.btserver.add_command("status", self._cmd_status)
 
         try:
             # Start loop
             asyncore.loop()
         except KeyboardInterrupt:
             print "Exiting\n"
-
             sys.exit(0)
 
         return True
 
+    def _cmd_status(self, handler, verbose = False):
+        try:
+            if verbose:
+                ret = self.wpa.request("STATUS-VERBOSE")
+            else:
+                ret = self.wpa.request("STATUS")
+
+            handler.send_success(dict((key.strip(), value.strip()) for key, value in (line.split("=") for line in ret.strip().split("\n"))))
+        except wpactrl.error as e:
+            handler.send_error(BTError.ERR_UNKNOWN, e)
+            pass
+
+    def _cmd_scan_result(self, handler):
+        try:
+            ret = self.wpa.scanresults()
+            logging.debug("SCAN RESULT returns: %s" % ret)
+
+            # Parse scan result and extract
+            bss_list = []
+            for no, bss in enumerate(ret):
+                bss_dict = dict((key.strip(), value.strip()) for key, value in (line.split("=") for line in bss.strip().split("\n")))
+                bss_list.append(bss_dict)
+
+            handler.send_success(data = bss_list)
+        except wpactrl.error as e:
+            handler.send_error(BTError.ERR_UNKNOWN, e)
+            pass
+
     def _cmd_scan(self, handler, wait = 10):
-        print "Wait: %d" % wait
         try:
             ret = self.wpa.request("SCAN")
             logging.debug("SCAN returns: %s" % ret)
@@ -74,12 +103,13 @@ class MainClass(argparse.ArgumentParser):
                 handler.send_error(BTError.ERR_UNKNOWN, "Error requesting scan: %s" % ret)
                 return;
 
+            if wait == 0:
+                handler.send_success()
+
+            logging.debug("Waiting for scan result %d seconds" % wait)
             time.sleep(wait)
 
-            scan_result = self.wpa.scanresults()
-            logging.debug("SCAN RESULT returns: %s" % scan_result)
-            
-            # Parse scan result and extract variables
+            self._cmd_scan_result(handler = handler)
         except wpactrl.error as e:
             handler.send_error(BTError.ERR_UNKNOWN, e)
             pass
