@@ -21,6 +21,7 @@ class MainClass(argparse.ArgumentParser):
         
         self.args = {}
 
+
     def process(self):
         self.args = vars(self.parse_args())
         if self.args["version"]:
@@ -28,12 +29,14 @@ class MainClass(argparse.ArgumentParser):
             sys.exit(0)
 
         uuid = "3FBBC3A8-627F-4A29-B76C-5CB836BD37A3"
+        log_level = logging.INFO
+
         if self.args["debug"]:
-            logging.basicConfig(level = logging.DEBUG)
+            log_level = logging.DEBUG
             if self.args["serial"]:
                 uuid = "00001101-0000-1000-8000-00805F9B34FB"
-        else:
-            logging.basicConfig(level = logging.INFO)
+
+        logging.basicConfig(level = log_level, format = "%(asctime)s - %(levelname)s - %(message)s")
 
         print("Raspberry PI Bluetooth WiFi Config\n")
 
@@ -57,6 +60,9 @@ class MainClass(argparse.ArgumentParser):
         self.btserver.add_command("scan", self._cmd_scan)
         self.btserver.add_command("scan_result", self._cmd_scan_result)
         self.btserver.add_command("status", self._cmd_status)
+        self.btserver.add_command("list_networks", self._cmd_list_networks)
+        self.btserver.add_command("network_get", self._cmd_network_get)
+        self.btserver.add_command("network_set", self._cmd_network_set)
 
         try:
             # Start loop
@@ -67,12 +73,61 @@ class MainClass(argparse.ArgumentParser):
 
         return True
 
+    def _cmd_network_set(self, handler, network, variable, value):
+        try:
+            ret = self.wpa.request("SET_NETWORK %s %s %s" % (network, variable, value)).strip()
+            logging.debug("SET_NETWORK %s %s %s returns:\n%s" % (network, variable, value, ret))
+
+            if ret == "FAIL":
+                handler.send_error(BTError.ERR_UNKNOWN, "Error setting property")
+                return
+
+            handler.send_success();
+        except wpactrl.error as e:
+            handler.send_error(BTError.ERR_UNKNOWN, e)
+            pass
+
+    def _cmd_network_get(self, handler, network, variable):
+        try:
+            ret = self.wpa.request("GET_NETWORK %s %s" % (network, variable)).strip()
+            logging.debug("GET_NETWORK %s %s returns:\n%s" % (network, variable, ret))
+
+            if ret == "FAIL":
+                handler.send_error(BTError.ERR_UNKNOWN, "Unknown property for this network")
+                return
+
+            handler.send_success(ret)
+        except wpactrl.error as e:
+            handler.send_error(BTError.ERR_UNKNOWN, e)
+            pass
+
+    def _cmd_list_networks(self, handler):
+        try:
+            ret = self.wpa.request("LIST_NETWORKS")
+            logging.debug("LIST_NETWORKS returns:\n%s" % ret)
+
+            ret_list = ret.strip().split("\n")
+            # remove line with headers
+            del ret_list[0]
+
+            nets = {}
+            for line in ret_list:
+                net_dict = dict(zip(("net_id", "ssid", "bssid", "flags"), line.strip().split("\t")))
+                nets[net_dict["net_id"]] = net_dict
+
+            handler.send_success(nets)
+        except wpactrl.error as e:
+            handler.send_error(BTError.ERR_UNKNOWN, e)
+            pass
+
     def _cmd_status(self, handler, verbose = False):
         try:
             if verbose:
                 ret = self.wpa.request("STATUS-VERBOSE")
             else:
                 ret = self.wpa.request("STATUS")
+
+            logging.debug("STATUS returns:\n%s" % ret)
 
             handler.send_success(dict((key.strip(), value.strip()) for key, value in (line.split("=") for line in ret.strip().split("\n"))))
         except wpactrl.error as e:
@@ -82,7 +137,7 @@ class MainClass(argparse.ArgumentParser):
     def _cmd_scan_result(self, handler):
         try:
             ret = self.wpa.scanresults()
-            logging.debug("SCAN RESULT returns: %s" % ret)
+            logging.debug("SCAN RESULT returns:\n%s" % ret)
 
             # Parse scan result and extract
             bss_list = []
@@ -98,13 +153,14 @@ class MainClass(argparse.ArgumentParser):
     def _cmd_scan(self, handler, wait = 10):
         try:
             ret = self.wpa.request("SCAN")
-            logging.debug("SCAN returns: %s" % ret)
+            logging.debug("SCAN returns:\n%s" % ret)
             if ret.strip() != "OK":
                 handler.send_error(BTError.ERR_UNKNOWN, "Error requesting scan: %s" % ret)
                 return;
 
             if wait == 0:
                 handler.send_success()
+                return
 
             logging.debug("Waiting for scan result %d seconds" % wait)
             time.sleep(wait)
